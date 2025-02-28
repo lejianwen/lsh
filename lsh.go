@@ -26,9 +26,13 @@ type LSH struct {
 	cacheMap   sync.Map              // 缓存
 	filePath   string                // 缓存文件路径
 }
-type kv struct {
+type scoreItem struct {
 	Id    string
 	Score float64
+}
+type kv struct {
+	K string    `json:"k"`
+	V []float64 `json:"v"`
 }
 
 // 初始化 LSH
@@ -187,13 +191,13 @@ func (l *LSH) Query(vector []float64, k int) []string {
 	}
 	wg.Wait()
 	if l.useCache {
-		sortedSimilarities := make([]kv, 0, k)
+		sortedSimilarities := make([]scoreItem, 0, k)
 		candidates.Range(func(key, value any) bool {
 			id := key.(string)
 			v, ok := l.cacheMap.Load(id)
 			if ok {
 				s := l.dotProduct(vector, v.([]float64))
-				sortedSimilarities = append(sortedSimilarities, kv{Id: id, Score: s})
+				sortedSimilarities = append(sortedSimilarities, scoreItem{Id: id, Score: s})
 			}
 			return true
 		})
@@ -286,13 +290,11 @@ func (l *LSH) saveTables() error {
 	}
 	defer f.Close()
 	//转成json
-	jsonStr, err := json.Marshal(l.hashTables)
-	if err != nil {
-		return err
-	}
-	_, err = f.Write(jsonStr)
-	if err != nil {
-		return err
+	encoder := json.NewEncoder(f)
+	for _, hashTable := range l.hashTables {
+		if err := encoder.Encode(hashTable); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -305,9 +307,14 @@ func (l *LSH) loadTables() error {
 	defer f.Close()
 	//读取json
 	var hashTables []map[string][]string
-	err = json.NewDecoder(f).Decode(&hashTables)
-	if err != nil {
-		return err
+	var hashTable map[string][]string
+	decoder := json.NewDecoder(f)
+	for decoder.More() {
+		if err := decoder.Decode(&hashTable); err != nil {
+			return err
+		}
+		hashTables = append(hashTables, hashTable)
+		hashTable = map[string][]string{}
 	}
 	l.hashTables = hashTables
 	return nil
@@ -356,22 +363,27 @@ func (l *LSH) saveCacheMap() error {
 		return err
 	}
 	defer f.Close()
-	//转成json
-	cacheMap := make(map[string][]float64)
+
+	// 创建 JSON 编码器
+	encoder := json.NewEncoder(f)
+	item := kv{
+		K: "",
+		V: nil,
+	}
+	// 逐个写入 key-value
 	l.cacheMap.Range(func(key, value any) bool {
-		cacheMap[key.(string)] = value.([]float64)
+		item = kv{
+			K: key.(string),
+			V: value.([]float64),
+		}
+		if err := encoder.Encode(item); err != nil {
+			return false
+		}
 		return true
 	})
-	jsonStr, err := json.Marshal(cacheMap)
-	if err != nil {
-		return err
-	}
-	_, err = f.Write(jsonStr)
-	if err != nil {
-		return err
-	}
 	return nil
 }
+
 func (l *LSH) loadCacheMap() error {
 	tp := fmt.Sprintf("%v/cacheMap.txt", l.filePath)
 	f, err := os.Open(tp)
@@ -379,17 +391,25 @@ func (l *LSH) loadCacheMap() error {
 		return err
 	}
 	defer f.Close()
-	//读取json
-	var cacheMap map[string][]float64
-	err = json.NewDecoder(f).Decode(&cacheMap)
-	if err != nil {
-		return err
+
+	// 创建 JSON 解码器
+	decoder := json.NewDecoder(f)
+	item := kv{
+		K: "",
+		V: nil,
 	}
-	for k, v := range cacheMap {
-		l.cacheMap.Store(k, v)
+	for decoder.More() {
+		if err := decoder.Decode(&item); err != nil {
+			return err
+		}
+		l.cacheMap.Store(item.K, item.V)
+		// 显式释放引用
+		item = kv{}
 	}
+
 	return nil
 }
+
 func (l *LSH) SaveToFile() error {
 	if l.filePath == "" {
 		return fmt.Errorf("file path is empty")
@@ -406,6 +426,9 @@ func (l *LSH) SaveToFile() error {
 	return nil
 }
 func (l *LSH) LoadFromFile() error {
+	if l.filePath == "" {
+		return fmt.Errorf("file path is empty")
+	}
 	if err := l.loadRandomVecs(); err != nil {
 		return err
 	}
