@@ -22,9 +22,9 @@ type LSH struct {
 	randomVecs [][][]float64         // 随机向量集合 [table][hash][dim]
 	hashTables []map[string][]string // 哈希表存储 [table][hash]
 	tableLocks []sync.RWMutex        // 每个哈希表的读写锁
-	useCache   bool                  // 是否使用缓存
+	useCache   bool                  // 是否使用缓存 如果不用缓存计算点积，基本得不到想要的结果
 	cacheMap   sync.Map              // 缓存
-	filePath   string                // 缓存文件路径
+	filePath   string                // 保存文件路径
 }
 type scoreItem struct {
 	Id    string
@@ -68,8 +68,8 @@ func NewLSH(numTables, numHashes, vectorSize int, filePath string) *LSH {
 	}
 }
 
-func NewNoCacheLSH(numTables, numHashes, vectorSize int) *LSH {
-	l := NewLSH(numTables, numHashes, vectorSize, "")
+func NewNoCacheLSH(numTables, numHashes, vectorSize int, filePath string) *LSH {
+	l := NewLSH(numTables, numHashes, vectorSize, filePath)
 	l.useCache = false
 	return l
 }
@@ -420,9 +420,12 @@ func (l *LSH) SaveToFile() error {
 	if err := l.saveTables(); err != nil {
 		return err
 	}
-	if err := l.saveCacheMap(); err != nil {
-		return err
+	if l.useCache {
+		if err := l.saveCacheMap(); err != nil {
+			return err
+		}
 	}
+
 	return nil
 }
 func (l *LSH) LoadFromFile() error {
@@ -435,8 +438,10 @@ func (l *LSH) LoadFromFile() error {
 	if err := l.loadTables(); err != nil {
 		return err
 	}
-	if err := l.loadCacheMap(); err != nil {
-		return err
+	if l.useCache {
+		if err := l.loadCacheMap(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

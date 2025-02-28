@@ -78,11 +78,29 @@ func TestLSH_SaveFile(t *testing.T) {
 	if err != nil {
 		t.Errorf("SaveToFile error: %v", err)
 	}
+
+	lsh2 := NewNoCacheLSH(10, 10, 2048, "./")
+	lsh2.AddVectors(vectors)
+
+	err2 := lsh2.SaveToFile()
+	if err2 != nil {
+		t.Errorf("SaveToFile error: %v", err2)
+	}
 }
 
 func TestLSH_LoadFile(t *testing.T) {
 	lsh := NewLSH(10, 10, 2048, "./")
 	err := lsh.SaveToFile()
+	if err != nil {
+		t.Errorf("SaveToFile error: %v", err)
+	}
+	err = lsh.LoadFromFile()
+	if err != nil {
+		t.Errorf("SaveToFile error: %v", err)
+	}
+
+	lsh = NewNoCacheLSH(10, 10, 2048, "./")
+	err = lsh.SaveToFile()
 	if err != nil {
 		t.Errorf("SaveToFile error: %v", err)
 	}
