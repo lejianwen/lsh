@@ -58,7 +58,7 @@ func TestLSH_EvaluateLSH(t *testing.T) {
 	lsh.AddVectors(vectors)
 
 	qvectors := make(map[string][]float64)
-	for k, _ := range groundTruth {
+	for k := range groundTruth {
 		qvectors[k] = vectors[k]
 	}
 
