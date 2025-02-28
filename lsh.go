@@ -320,8 +320,8 @@ func (l *LSH) loadTables() error {
 	return nil
 }
 
-// saveRandomVecs 保存随机向量
-func (l *LSH) saveRandomVecs() error {
+// SaveRandomVecs 保存随机向量
+func (l *LSH) SaveRandomVecs() error {
 	tp := fmt.Sprintf("%v/randomVecs_%d_%d_%d.txt", l.filePath, l.numTables, l.numHashes, l.vectorSize)
 	f, err := os.Create(tp)
 	if err != nil {
@@ -339,7 +339,7 @@ func (l *LSH) saveRandomVecs() error {
 	}
 	return nil
 }
-func (l *LSH) loadRandomVecs() error {
+func (l *LSH) LoadRandomVecs() error {
 	tp := fmt.Sprintf("%v/randomVecs_%d_%d_%d.txt", l.filePath, l.numTables, l.numHashes, l.vectorSize)
 	f, err := os.Open(tp)
 	if err != nil {
@@ -414,7 +414,7 @@ func (l *LSH) SaveToFile() error {
 	if l.filePath == "" {
 		return fmt.Errorf("file path is empty")
 	}
-	if err := l.saveRandomVecs(); err != nil {
+	if err := l.SaveRandomVecs(); err != nil {
 		return err
 	}
 	if err := l.saveTables(); err != nil {
@@ -429,7 +429,7 @@ func (l *LSH) LoadFromFile() error {
 	if l.filePath == "" {
 		return fmt.Errorf("file path is empty")
 	}
-	if err := l.loadRandomVecs(); err != nil {
+	if err := l.LoadRandomVecs(); err != nil {
 		return err
 	}
 	if err := l.loadTables(); err != nil {
