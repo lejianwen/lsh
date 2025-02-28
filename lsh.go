@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-var json = sonic.ConfigFastest
+var json = sonic.ConfigStd
 
 // LSH 结构体（并发安全版本）
 type LSH struct {
