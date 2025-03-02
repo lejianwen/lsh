@@ -2,6 +2,7 @@ package lsh
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 )
 
@@ -18,8 +19,15 @@ var groundTruth = map[string][]string{
 	"item4": {"item1"},
 }
 
+func TestVec_L2Normalizer(t *testing.T) {
+	vec := []float64{3, 4}
+	L2Normalize(vec)
+	if vec[0] != 0.6 || vec[1] != 0.8 {
+		t.Errorf("L2Normalize error: %v", vec)
+	}
+}
 func TestLSH_Query(t *testing.T) {
-	lsh := NewLSH(10, 10, 2048, "")
+	lsh := NewLSH(10, 10, 2048)
 	lsh.AddVectors(vectors)
 
 	// Query
@@ -31,7 +39,7 @@ func TestLSH_Query(t *testing.T) {
 }
 
 func TestLSH_BatchQuery(t *testing.T) {
-	lsh := NewLSH(10, 10, 2048, "./")
+	lsh := NewLSH(10, 10, 2048)
 	lsh.AddVectors(vectors)
 
 	// Query
@@ -43,7 +51,7 @@ func TestLSH_BatchQuery(t *testing.T) {
 }
 
 func TestLSH_Migrate(t *testing.T) {
-	lsh := NewLSH(10, 10, 2048, "./")
+	lsh := NewLSH(10, 10, 2048)
 	lsh.AddVectors(vectors)
 
 	// Migrate
@@ -54,7 +62,7 @@ func TestLSH_Migrate(t *testing.T) {
 }
 
 func TestLSH_EvaluateLSH(t *testing.T) {
-	lsh := NewLSH(5, 8, 2048, "./")
+	lsh := NewLSH(5, 8, 2048)
 	lsh.AddVectors(vectors)
 
 	qvectors := make(map[string][]float64)
@@ -71,17 +79,17 @@ func TestLSH_EvaluateLSH(t *testing.T) {
 }
 
 func TestLSH_SaveFile(t *testing.T) {
-	lsh := NewLSH(10, 10, 2048, "./")
+	lsh := NewLSH(10, 10, 2048)
 	lsh.AddVectors(vectors)
-
+	lsh.SetFilePath("./")
 	err := lsh.SaveToFile()
 	if err != nil {
 		t.Errorf("SaveToFile error: %v", err)
 	}
 
-	lsh2 := NewNoCacheLSH(10, 10, 2048, "./")
+	lsh2 := NewNoCacheLSH(10, 10, 2048)
 	lsh2.AddVectors(vectors)
-
+	lsh2.SetFilePath("./")
 	err2 := lsh2.SaveToFile()
 	if err2 != nil {
 		t.Errorf("SaveToFile error: %v", err2)
@@ -89,7 +97,8 @@ func TestLSH_SaveFile(t *testing.T) {
 }
 
 func TestLSH_LoadFile(t *testing.T) {
-	lsh := NewLSH(10, 10, 2048, "./")
+	lsh := NewLSH(10, 10, 2048)
+	lsh.SetFilePath("./")
 	err := lsh.SaveToFile()
 	if err != nil {
 		t.Errorf("SaveToFile error: %v", err)
@@ -99,19 +108,62 @@ func TestLSH_LoadFile(t *testing.T) {
 		t.Errorf("SaveToFile error: %v", err)
 	}
 
-	lsh = NewNoCacheLSH(10, 10, 2048, "./")
+	lsh = NewNoCacheLSH(10, 10, 2048)
+	lsh.SetFilePath("./")
 	err = lsh.SaveToFile()
 	if err != nil {
 		t.Errorf("SaveToFile error: %v", err)
 	}
+	oldTables := lsh.hashTables
 	err = lsh.LoadFromFile()
 	if err != nil {
 		t.Errorf("SaveToFile error: %v", err)
 	}
+	newTables := lsh.hashTables
+	if !reflect.DeepEqual(oldTables, newTables) {
+		t.Errorf("SaveToFile error: %v", err)
+	}
 }
 
+func TestLSH_Precision(t *testing.T) {
+	lsh := NewLSH(10, 10, 2048)
+	lsh.SetPrecisionHandler(NewPrecisionHandler(PrecisionInt16))
+	lsh.AddVectors(vectors)
+
+	// Query
+	neighbors := lsh.Query(vectors["item1"], 2)
+	fmt.Printf("Query result: %v\n", neighbors)
+	if neighbors[0] != "item1" {
+		t.Errorf("Query error: %v", neighbors)
+	}
+
+}
+
+func TestLSH_PrecisionSaveLoadFile(t *testing.T) {
+	lsh := NewLSH(10, 10, 2048)
+	lsh.SetPrecisionHandler(NewPrecisionHandler(PrecisionInt16))
+	lsh.AddVectors(vectors)
+
+	lsh.SetFilePath("./")
+	err := lsh.SaveToFile()
+	if err != nil {
+		t.Errorf("SaveToFile error: %v", err)
+	}
+	oldTables := lsh.hashTables
+	err = lsh.LoadFromFile()
+	if err != nil {
+		t.Errorf("SaveToFile error: %v", err)
+	}
+	newTables := lsh.hashTables
+
+	if !reflect.DeepEqual(oldTables, newTables) {
+		t.Errorf("SaveToFile error: %v", err)
+	}
+
+}
 func BenchmarkLSH_Query(b *testing.B) {
-	lsh := NewLSH(10, 10, 2048, "")
+	lsh := NewLSH(10, 10, 2048)
+
 	lsh.AddVectors(vectors)
 
 	b.ResetTimer()
@@ -121,7 +173,7 @@ func BenchmarkLSH_Query(b *testing.B) {
 }
 
 func BenchmarkLSH_BatchQuery(b *testing.B) {
-	lsh := NewLSH(10, 10, 2048, "")
+	lsh := NewLSH(10, 10, 2048)
 	lsh.AddVectors(vectors)
 
 	b.ResetTimer()

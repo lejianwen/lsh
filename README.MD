@@ -1,121 +1,113 @@
-# Locality-Sensitive Hashing (LSH) Implementation
+## 简介
 
-## Introduction
+该项目实现了一个局部敏感哈希（LSH）算法，用于高效地进行相似性搜索和向量查询。
 
-This project implements a Locality-Sensitive Hashing (LSH) algorithm in Go. LSH is a method for performing probabilistic dimension reduction of high-dimensional data. It is used for tasks such as nearest neighbor search in high-dimensional spaces, which is common in applications like image retrieval, document clustering, and recommendation systems.
+## 功能
 
-## Features
+- 添加向量
+- 查询相似向量
+- 批量查询相似向量
+- 迁移哈希表
+- 评估LSH算法的精度、召回率和F1值
+- 保存和加载哈希表
+- 设置不同精度处理器
 
-- **Add Vectors**: Add individual or batch vectors to the LSH tables.
-- **Query**: Perform approximate nearest neighbor search for a given vector.
-- **Batch Query**: Perform approximate nearest neighbor search for multiple vectors.
-- **Evaluate**: Evaluate the precision, recall, and F1 score of the LSH implementation.
-- **Save and Load**: Save and load the LSH tables and vectors to/from files.
-- **Migrate**: Migrate the LSH tables to a new configuration with different parameters.
+## 安装
 
-## Installation
-
-Clone the repository:
+克隆
 
 ```sh
-git clone https://github.com/yourusername/lsh.git
+git clone https://github.com/lejianwen/lsh
 cd lsh
 ```
 
-Install the required dependencies:
+## 使用
 
-```sh
+```go
 go get -u github.com/lejianwen/lsh
 ```
 
-## Usage
-
-### Adding Vectors
-
-To add vectors to the LSH tables, use the `AddVector` or `AddVectors` methods:
+### 添加向量
 
 ```go
-lsh := NewLSH(10, 10, 2048, "")
-lsh.AddVector("item1", []float64{...})
-lsh.AddVectors(map[string][]float64{
-    "item1": {...},
-    "item2": {...},
-})
+var vectors = map[string][]float64{
+"item1": {-0.010979787, 0.0208240951, -0.006406612, 0.0070472737, ...},
+"item2": {-0.0402136976, 0.0058495451, -0.0306575614, ...},
+"item3": {-0.0333253096, -0.0037028126, -0.0085615029, ...},
+"item4": {-0.01552303, 0.0351111111, -0.0183980546, ...},
+"item5": {0.0097557013, 0.0152862035, 0.0014691215,...},
+"item6": {-0.0180807306, 0.0101798173, -0.0130499444,...},
+...
+}
+
+l := NewLSH(10, 10, 2048)
+l.AddVector("item1", vectors["item1"])
+
+l.AddVectors(vectors)
+
+vec := []float64{3,4,...} //非L2归一化的向量
+//先归一化
+lsh.L2Normalize(vec)
+l.AddVector("item1", vec)
+
 ```
 
-### Querying
 
-To perform a nearest neighbor search, use the `Query` or `BatchQuery` methods:
+
+### 查询相似向量
 
 ```go
-neighbors := lsh.Query([]float64{...}, 2)
-batchNeighbors := lsh.BatchQuery(map[string][]float64{
-    "item1": {...},
-    "item2": {...},
-}, 2)
+neighbors := lsh.Query(vectors["item1"], 2)
+fmt.Printf("Query result: %v\n", neighbors)
 ```
 
-### Evaluation
-
-To evaluate the LSH implementation, use the `EvaluateLSH` method:
+### 批量查询相似向量
 
 ```go
-precision, recall, f1 := lsh.EvaluateLSH(testQueries, groundTruth, 2)
+neighbors := lsh.BatchQuery(vectors, 2)
+fmt.Printf("Query result: %+v\n", neighbors)
 ```
 
-### Saving and Loading
-
-To save and load the LSH tables and vectors, use the `SaveToFile` and `LoadFromFile` methods:
+### 迁移哈希表
 
 ```go
+err, _ := lsh.Migrate(12, 12)
+if err != nil {
+log.Fatalf("Migrate error: %v", err)
+}
+```
+
+### 评估LSH算法
+
+```go
+precision, recall, f1 := lsh.EvaluateLSH(qvectors, groundTruth, 2)
+fmt.Printf("Evaluate result: precision=%v, recall=%v, f1=%v\n", precision, recall, f1)
+```
+
+### 保存和加载到文件
+
+```go
+lsh.SetFilePath("./")
 err := lsh.SaveToFile()
 if err != nil {
-    log.Fatalf("SaveToFile error: %v", err)
+log.Fatalf("SaveToFile error: %v", err)
 }
 
 err = lsh.LoadFromFile()
 if err != nil {
-    log.Fatalf("LoadFromFile error: %v", err)
+log.Fatalf("LoadFromFile error: %v", err)
 }
 ```
 
-### Migration
+### 设置精度处理器
 
-To migrate the LSH tables to a new configuration, use the `Migrate` method:
+支持`int8`、`int16`、`float32`和`float64`精度
+精度越低内存占用越小，但是精度越低，查询结果的准确性也会降低
 
 ```go
-err, newLsh := lsh.Migrate(12, 12)
-if err != nil {
-    log.Fatalf("Migrate error: %v", err)
-}
+lsh.SetPrecisionHandler(NewPrecisionHandler(PrecisionInt16))
 ```
 
-### Benchmarking
+## 许可证
 
-To benchmark the performance of the query operations, use the `BenchmarkLSH_Query` and `BenchmarkLSH_BatchQuery` methods:
-
-```go
-func BenchmarkLSH_Query(b *testing.B) {
-    lsh := NewLSH(10, 10, 2048, "")
-    lsh.AddVectors(vectors)
-
-    b.ResetTimer()
-    for i := 0; i < b.N; i++ {
-        lsh.Query(vectors["item1"], 2)
-    }
-}
-
-func BenchmarkLSH_BatchQuery(b *testing.B) {
-    lsh := NewLSH(10, 10, 2048, "")
-    lsh.AddVectors(vectors)
-
-    b.ResetTimer()
-    for i := 0; i < b.N; i++ {
-        lsh.BatchQuery(vectors, 2)
-    }
-}
-```
-
-## License
-
-This project is licensed under the MIT License. See the `LICENSE` file for details.
+此项目使用MIT许可证。详见`LICENSE`文件。

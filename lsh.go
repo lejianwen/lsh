@@ -3,18 +3,15 @@ package lsh
 import (
 	"fmt"
 	"github.com/bytedance/sonic"
-	"math"
-	"math/rand"
 	"os"
 	"sort"
 	"strings"
 	"sync"
-	"time"
 )
 
 var json = sonic.ConfigStd
 
-// LSH 结构体（并发安全版本）
+// LSH 结构体
 type LSH struct {
 	numTables  int                   // 哈希表数量 ： 越大，召回率高，但内存占用大。越 小，查询速度快，但召回率低。一般取 10~100 之间
 	numHashes  int                   // 每个表的哈希函数数量 ： 越大，召回率低，但误检率低（更精确）。 越小，召回率高，但误检率高（可能返回不相关的向量）。一般取 4~16 之间
@@ -25,26 +22,22 @@ type LSH struct {
 	useCache   bool                  // 是否使用缓存 如果不用缓存计算点积，基本得不到想要的结果
 	cacheMap   sync.Map              // 缓存
 	filePath   string                // 保存文件路径
+	//精度处理
+	precisionHandler PrecisionHandler
 }
 type scoreItem struct {
 	Id    string
 	Score float64
 }
-type kv struct {
-	K string    `json:"k"`
-	V []float64 `json:"v"`
-}
 
 // 初始化 LSH
-func NewLSH(numTables, numHashes, vectorSize int, filePath string) *LSH {
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-
+func NewLSH(numTables, numHashes, vectorSize int) *LSH {
 	// 生成随机向量（三维数组）
 	randomVecs := make([][][]float64, numTables)
 	for t := 0; t < numTables; t++ {
 		randomVecs[t] = make([][]float64, numHashes)
 		for h := 0; h < numHashes; h++ {
-			randomVecs[t][h] = randomUnitVector(vectorSize, r)
+			randomVecs[t][h] = randomUnitVector(vectorSize)
 		}
 	}
 
@@ -56,55 +49,35 @@ func NewLSH(numTables, numHashes, vectorSize int, filePath string) *LSH {
 	}
 
 	return &LSH{
-		numTables:  numTables,
-		numHashes:  numHashes,
-		vectorSize: vectorSize,
-		randomVecs: randomVecs,
-		hashTables: hashTables,
-		tableLocks: tableLocks,
-		useCache:   true,
-		cacheMap:   sync.Map{},
-		filePath:   strings.TrimRight(filePath, "/"),
+		numTables:        numTables,
+		numHashes:        numHashes,
+		vectorSize:       vectorSize,
+		randomVecs:       randomVecs,
+		hashTables:       hashTables,
+		tableLocks:       tableLocks,
+		useCache:         true,
+		cacheMap:         sync.Map{},
+		precisionHandler: NewPrecisionHandler(PrecisionFloat64),
 	}
 }
 
-func NewNoCacheLSH(numTables, numHashes, vectorSize int, filePath string) *LSH {
-	l := NewLSH(numTables, numHashes, vectorSize, filePath)
+func NewNoCacheLSH(numTables, numHashes, vectorSize int) *LSH {
+	l := NewLSH(numTables, numHashes, vectorSize)
 	l.useCache = false
 	return l
 }
 
-// 生成随机向量（范围：[-1, 1)）
-func generateRandomVector(size int, r *rand.Rand) []float64 {
-	vector := make([]float64, size)
-	for i := range vector {
-		vector[i] = r.Float64()*2 - 1
-	}
-	return vector
+func (l *LSH) DisableCache() {
+	l.useCache = false
 }
-
-// 生成单位向量
-func randomUnitVector(dimension int, r *rand.Rand) []float64 {
-	vec := make([]float64, dimension)
-	var norm float64
-	for i := range vec {
-		vec[i] = r.Float64()*2 - 1 // 生成 [-1,1] 之间的随机数
-		norm += vec[i] * vec[i]
-	}
-	norm = math.Sqrt(norm)
-	for i := range vec {
-		vec[i] /= norm
-	}
-	return vec
+func (l *LSH) EnableCache() {
+	l.useCache = true
 }
-
-// 计算点积
-func (l *LSH) dotProduct(vecA, vecB []float64) float64 {
-	sum := 0.0
-	for i := range vecA {
-		sum += vecA[i] * vecB[i]
-	}
-	return sum
+func (l *LSH) SetFilePath(filePath string) {
+	l.filePath = strings.TrimRight(filePath, "/")
+}
+func (l *LSH) SetPrecisionHandler(precisionHandler PrecisionHandler) {
+	l.precisionHandler = precisionHandler
 }
 
 // 计算单个哈希表的哈希值（二进制字符串）
@@ -113,7 +86,7 @@ func (l *LSH) computeHash(vector []float64, tableIdx int) string {
 	sb.Grow(l.numHashes) // 预分配空间
 
 	for h := 0; h < l.numHashes; h++ {
-		dot := l.dotProduct(vector, l.randomVecs[tableIdx][h])
+		dot := DotProduct(vector, l.randomVecs[tableIdx][h])
 		if dot >= 0 {
 			sb.WriteByte('1')
 		} else {
@@ -123,10 +96,19 @@ func (l *LSH) computeHash(vector []float64, tableIdx int) string {
 	return sb.String()
 }
 
-// 添加向量（并行版）
+func (l *LSH) addCacheItem(id string, vec []float64) {
+	item := l.precisionHandler.ConvertVector(vec)
+	l.cacheMap.Store(id, item)
+}
+
+func (l *LSH) loadCacheItem(id string) (any, bool) {
+	return l.cacheMap.Load(id)
+}
+
+// 添加向量
 func (l *LSH) AddVector(id string, vector []float64) {
 	if l.useCache {
-		l.cacheMap.Store(id, vector)
+		l.addCacheItem(id, vector)
 	}
 
 	var wg sync.WaitGroup
@@ -164,7 +146,32 @@ func (l *LSH) AddVectors(vectors map[string][]float64) {
 	wg.Wait()
 }
 
-// 查询近似最近邻（并行版）
+/*func _getSimilarity[T PrecisionType](vector []float64, candidates *sync.Map, l *LSH, strategy DotProductStrategy[T], k int) []string {
+	similarities := make([]scoreItem, 0, k)
+	vLow := strategy.ConvertVector(vector)
+	candidates.Range(func(key, value any) bool {
+		id := key.(string)
+		v, ok := l.loadCacheItem(id)
+		if ok {
+			s := strategy.Calculate(vLow, v.([]T))
+			similarities = append(similarities, scoreItem{Id: id, Score: s})
+		}
+		return true
+	})
+	sort.Slice(similarities, func(i, j int) bool {
+		return similarities[i].Score > similarities[j].Score
+	})
+	if len(similarities) > k {
+		similarities = similarities[:k]
+	}
+	result := make([]string, 0, k)
+	for _, v := range similarities {
+		result = append(result, v.Id)
+	}
+	return result
+}*/
+
+// 查询近似最近邻
 func (l *LSH) Query(vector []float64, k int) []string {
 	var candidates sync.Map
 	var wg sync.WaitGroup
@@ -190,17 +197,20 @@ func (l *LSH) Query(vector []float64, k int) []string {
 		}(t)
 	}
 	wg.Wait()
+
 	if l.useCache {
+		vectorLow := l.precisionHandler.ConvertVector(vector)
 		sortedSimilarities := make([]scoreItem, 0, k)
 		candidates.Range(func(key, value any) bool {
 			id := key.(string)
-			v, ok := l.cacheMap.Load(id)
+			v, ok := l.loadCacheItem(id)
 			if ok {
-				s := l.dotProduct(vector, v.([]float64))
+				s := l.precisionHandler.DotProduct(vectorLow, v)
 				sortedSimilarities = append(sortedSimilarities, scoreItem{Id: id, Score: s})
 			}
 			return true
 		})
+
 		sort.Slice(sortedSimilarities, func(i, j int) bool {
 			return sortedSimilarities[i].Score > sortedSimilarities[j].Score
 		})
@@ -212,6 +222,7 @@ func (l *LSH) Query(vector []float64, k int) []string {
 			result = append(result, v.Id)
 		}
 		return result
+
 	} else {
 		result := make([]string, 0, k)
 		candidates.Range(func(key, value any) bool {
@@ -356,7 +367,12 @@ func (l *LSH) LoadRandomVecs() error {
 	return nil
 }
 
-func (l *LSH) saveCacheMap() error {
+type kv[T int8 | int16 | float32 | float64] struct {
+	K string `json:"k"`
+	V []T    `json:"v"`
+}
+
+func _saveCacheMap[T int8 | int16 | float32 | float64](l *LSH) error {
 	tp := fmt.Sprintf("%v/cacheMap.txt", l.filePath)
 	f, err := os.Create(tp)
 	if err != nil {
@@ -364,17 +380,17 @@ func (l *LSH) saveCacheMap() error {
 	}
 	defer f.Close()
 
-	// 创建 JSON 编码器
-	encoder := json.NewEncoder(f)
-	item := kv{
+	item := kv[T]{
 		K: "",
 		V: nil,
 	}
+	// 创建 JSON 编码器
+	encoder := json.NewEncoder(f)
 	// 逐个写入 key-value
 	l.cacheMap.Range(func(key, value any) bool {
-		item = kv{
+		item = kv[T]{
 			K: key.(string),
-			V: value.([]float64),
+			V: value.([]T),
 		}
 		if err := encoder.Encode(item); err != nil {
 			return false
@@ -383,8 +399,21 @@ func (l *LSH) saveCacheMap() error {
 	})
 	return nil
 }
-
-func (l *LSH) loadCacheMap() error {
+func (l *LSH) saveCacheMap() error {
+	switch l.precisionHandler.Type() {
+	case PrecisionInt8:
+		return _saveCacheMap[int8](l)
+	case PrecisionInt16:
+		return _saveCacheMap[int16](l)
+	case PrecisionFloat32:
+		return _saveCacheMap[float32](l)
+	case PrecisionFloat64:
+		return _saveCacheMap[float64](l)
+	default:
+		return fmt.Errorf("unsupported precision type")
+	}
+}
+func _loadCacheMap[T int8 | int16 | float32 | float64](l *LSH) error {
 	tp := fmt.Sprintf("%v/cacheMap.txt", l.filePath)
 	f, err := os.Open(tp)
 	if err != nil {
@@ -394,20 +423,31 @@ func (l *LSH) loadCacheMap() error {
 
 	// 创建 JSON 解码器
 	decoder := json.NewDecoder(f)
-	item := kv{
-		K: "",
-		V: nil,
-	}
+	item := kv[T]{}
 	for decoder.More() {
 		if err := decoder.Decode(&item); err != nil {
 			return err
 		}
 		l.cacheMap.Store(item.K, item.V)
 		// 显式释放引用
-		item = kv{}
+		item = kv[T]{}
 	}
 
 	return nil
+}
+func (l *LSH) loadCacheMap() error {
+	switch l.precisionHandler.Type() {
+	case PrecisionInt8:
+		return _loadCacheMap[int8](l)
+	case PrecisionInt16:
+		return _loadCacheMap[int16](l)
+	case PrecisionFloat32:
+		return _loadCacheMap[float32](l)
+	case PrecisionFloat64:
+		return _loadCacheMap[float64](l)
+	default:
+		return fmt.Errorf("unsupported precision type")
+	}
 }
 
 func (l *LSH) SaveToFile() error {
@@ -425,7 +465,6 @@ func (l *LSH) SaveToFile() error {
 			return err
 		}
 	}
-
 	return nil
 }
 func (l *LSH) LoadFromFile() error {
@@ -443,6 +482,7 @@ func (l *LSH) LoadFromFile() error {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -450,7 +490,9 @@ func (l *LSH) Migrate(numTables, numHashes int) (error, *LSH) {
 	if !l.useCache {
 		return fmt.Errorf("cache is disabled"), nil
 	}
-	nl := NewLSH(numTables, numHashes, l.vectorSize, l.filePath)
+	nl := NewLSH(numTables, numHashes, l.vectorSize)
+	nl.useCache = l.useCache
+	nl.filePath = l.filePath
 	l.cacheMap.Range(func(key, value any) bool {
 		nl.AddVector(key.(string), value.([]float64))
 		return true
