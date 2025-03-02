@@ -367,12 +367,12 @@ func (l *LSH) LoadRandomVecs() error {
 	return nil
 }
 
-type kv[T int8 | int16 | float32 | float64] struct {
+type kv[T PrecisionType] struct {
 	K string `json:"k"`
 	V []T    `json:"v"`
 }
 
-func _saveCacheMap[T int8 | int16 | float32 | float64](l *LSH) error {
+func _saveCacheMap[T PrecisionType](l *LSH) error {
 	tp := fmt.Sprintf("%v/cacheMap.txt", l.filePath)
 	f, err := os.Create(tp)
 	if err != nil {
@@ -413,7 +413,7 @@ func (l *LSH) saveCacheMap() error {
 		return fmt.Errorf("unsupported precision type")
 	}
 }
-func _loadCacheMap[T int8 | int16 | float32 | float64](l *LSH) error {
+func _loadCacheMap[T PrecisionType](l *LSH) error {
 	tp := fmt.Sprintf("%v/cacheMap.txt", l.filePath)
 	f, err := os.Open(tp)
 	if err != nil {
@@ -490,9 +490,13 @@ func (l *LSH) Migrate(numTables, numHashes int) (error, *LSH) {
 	if !l.useCache {
 		return fmt.Errorf("cache is disabled"), nil
 	}
+	if l.precisionHandler.Type() != PrecisionFloat64 && l.precisionHandler.Type() != PrecisionFloat32 {
+		return fmt.Errorf("unsupported precision type"), nil
+	}
 	nl := NewLSH(numTables, numHashes, l.vectorSize)
 	nl.useCache = l.useCache
 	nl.filePath = l.filePath
+	nl.SetPrecisionHandler(l.precisionHandler)
 	l.cacheMap.Range(func(key, value any) bool {
 		nl.AddVector(key.(string), value.([]float64))
 		return true
